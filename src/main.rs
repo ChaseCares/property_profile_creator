@@ -324,7 +324,7 @@ async fn create_listing(url: String) -> Result<(), AppError> {
     }
 
     let nc_client = NextcloudClient::new(&config.nc_url, &config.nc_user, &config.nc_pass);
-    let remote_base_path = "Propertys"; // TODO: Make this configurable
+    let remote_base_path = "Propertes"; // TODO: Make this configurable
     let remote_property_dir = format!("{}/{}", remote_base_path, metadata.street);
     let remote_images_dir = format!("{remote_property_dir}/images/compass");
 
