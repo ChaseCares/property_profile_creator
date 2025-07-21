@@ -433,6 +433,12 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
         .create_folder_recursive(&remote_images_dir, tx_clone)
         .await?;
 
+    let remote_docs_dir = format!("{remote_property_dir}/docs");
+    let tx_clone = tx.clone();
+    nc_client
+        .create_folder_recursive(&remote_docs_dir, tx_clone)
+        .await?;
+
     for (i, _) in metadata.image_links.iter().enumerate() {
         let file_name = format!("{}.webp", i + 1);
         let local_path = images_dir.join(&file_name);
@@ -466,7 +472,7 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
     );
     contents = contents.replace("{{description}}", &metadata.description);
     contents = contents.replace("{{mls}}", &metadata.mls);
-    contents = contents.replace("{{photo}}", "![First image](images/compass/1.webp)");
+    contents = contents.replace("{{photo}}", "![First image](./images/compass/1.webp)");
 
     fs::write(&template_local_path, contents).await?;
 
