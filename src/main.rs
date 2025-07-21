@@ -12,8 +12,9 @@
 
 use std::{
     env,
+    hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use actix_web::{App, HttpResponse, HttpServer, Responder, web};
@@ -132,7 +133,7 @@ impl Scraper {
     ) -> Result<PropertyMetadata, AppError> {
         report(
             &tx,
-            &format!("Fetching HTML from {url}...\n"),
+            &format!("Fetching HTML from {url}..."),
             ReportType::Info,
         )
         .await;
@@ -370,15 +371,18 @@ impl NextcloudClient {
     }
 }
 
+fn hash_url_to_filename(url: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    let hash = hasher.finish();
+    format!("{hash:x}")
+}
+
 async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), AppError> {
     let config = Config::from_env()?;
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        .to_string();
+    let listing_id = hash_url_to_filename(&url);
 
-    let base_dir = PathBuf::from(&config.output_dir).join(&timestamp);
+    let base_dir = PathBuf::from(&config.output_dir).join(&listing_id);
     let images_dir = base_dir.join("images");
     fs::create_dir_all(&images_dir).await?;
 
