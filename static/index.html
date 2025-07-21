@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Simple Web App</title>
+
+		<style>
+			body {
+				font-family: sans-serif;
+				display: grid;
+				place-content: center;
+				height: 100vh;
+				margin: 0;
+			}
+			div {
+				padding: 2rem;
+				border: 1px solid #ccc;
+				border-radius: 8px;
+				text-align: center;
+			}
+			input {
+				margin-right: 0.5rem;
+			}
+			a {
+				display: inline-block;
+				margin-top: 1.5rem;
+			}
+		</style>
+	</head>
+	<body>
+		<div>
+			<h1>Create a Listing</h1>
+			<form action="/create" method="post">
+				<label for="listing_text">Item Name:</label>
+				<input type="text" id="listing_text" name="listing_text" required />
+				<button type="submit">Create</button>
+			</form>
+		</div>
+	</body>
+</html>
