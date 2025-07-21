@@ -9,6 +9,8 @@ RUN cargo build --release
 
 FROM debian:stable-slim
 
+RUN apt-get update && apt-get install -y libssl3 && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /usr/src/app
 
 COPY --from=builder /app/target/release/property_profile_creator .
