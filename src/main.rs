@@ -82,6 +82,10 @@ static PRICE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"propertyHistory-table-td.><div>\$([0-9,]+)</div></td></tr>").unwrap()
 });
 
+static DESCRIPTION_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r".,.addressCountry.:.US.}},.description.:.(.+?).,.floorSize.:").unwrap()
+});
+
 #[derive(Serialize, Debug)]
 struct PropertyMetadata {
     url: String,
@@ -91,6 +95,7 @@ struct PropertyMetadata {
     zip: String,
     mls: String,
     price: u32,
+    description: String,
     #[serde(skip)]
     image_links: Vec<String>,
 }
@@ -132,6 +137,12 @@ impl Scraper {
             .map(|m| m.as_str().replace(',', ""))
             .ok_or_else(|| AppError::Parse("Could not extract price".to_string()))?;
 
+        let description = DESCRIPTION_RE
+            .captures(&html)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str())
+            .ok_or_else(|| AppError::Parse("Could not extract property description".to_string()))?;
+
         let image_links = IMAGE_LINK_RE
             .captures_iter(&html)
             .map(|cap| cap[1].to_string())
@@ -147,6 +158,7 @@ impl Scraper {
             price: price_str
                 .parse()
                 .map_err(|_| AppError::Parse(format!("Failed to parse price: {price_str}")))?,
+            description: description.to_string(),
             image_links,
         })
     }
@@ -355,6 +367,7 @@ async fn create_listing(url: String) -> Result<(), AppError> {
         "{{price}}",
         &format!("${}", metadata.price.to_formatted_string(&Locale::en)),
     );
+    contents = contents.replace("{{description}}", &metadata.description);
     contents = contents.replace("{{mls}}", &metadata.mls);
     contents = contents.replace("{{photo}}", "![First image](images/compass/1.webp)");
 
