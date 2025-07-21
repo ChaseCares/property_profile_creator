@@ -130,8 +130,13 @@ impl Scraper {
         url: &str,
         tx: mpsc::Sender<String>,
     ) -> Result<PropertyMetadata, AppError> {
-        println!("Fetching HTML from {url}...");
-        let _ = tx.send(format!("Fetching HTML from {url}...\n")).await;
+        report(
+            &tx,
+            &format!("Fetching HTML from {url}...\n"),
+            ReportType::Info,
+        )
+        .await;
+
         let html = self.client.get(url).send().await?.text().await?;
 
         let st_city_state_zip_caps = ST_CITY_STATE_ZIP_RE.captures(&html).ok_or_else(|| {
@@ -177,27 +182,31 @@ impl Scraper {
         delay: u64,
         tx: mpsc::Sender<String>,
     ) -> Result<(), AppError> {
-        println!(
-            "Downloading {} images sequentially...",
-            metadata.image_links.len()
-        );
-        let _ = tx
-            .send(format!(
+        report(
+            &tx,
+            &format!(
                 "Downloading {} images sequentially...",
                 metadata.image_links.len()
-            ))
-            .await;
+            ),
+            ReportType::Info,
+        )
+        .await;
+
         for (i, link) in metadata.image_links.iter().enumerate() {
             let file_name = format!("{}.webp", i + 1);
             let file_path = images_dir.join(file_name);
-            println!("Downloading {link}...");
-            let _ = tx.send(format!("Downloading {link}...\n")).await;
+            report(&tx, &format!("Downloading {link}..."), ReportType::Info).await;
 
             if file_path.exists() {
-                println!(" -> File already exists. Skipping.");
-                let _ = tx
-                    .send(" -> File already exists. Skipping.".to_string())
-                    .await;
+                report(
+                    &tx,
+                    &format!(
+                        " -> File already exists at {}. Skipping.",
+                        file_path.display()
+                    ),
+                    ReportType::Info,
+                )
+                .await;
                 continue;
             }
 
@@ -205,10 +214,12 @@ impl Scraper {
             let content = response.bytes().await?;
             fs::write(&file_path, &content).await?;
 
-            println!(" -> Saved to {}", file_path.display());
-            let _ = tx
-                .send(format!(" -> Saved to {}", file_path.display()))
-                .await;
+            report(
+                &tx,
+                &format!(" -> Saved to {}", file_path.display()),
+                ReportType::Info,
+            )
+            .await;
             tokio::time::sleep(Duration::from_secs(delay)).await;
         }
         Ok(())
@@ -261,14 +272,12 @@ impl NextcloudClient {
     ) -> Result<(), AppError> {
         let url = self.build_dav_url(remote_path);
         let file_contents = fs::read(local_path).await?;
-        println!("Uploading '{}' to '{}'", local_path.display(), remote_path);
-        let _ = tx
-            .send(format!(
-                "Uploading '{}' to '{}'",
-                local_path.display(),
-                remote_path
-            ))
-            .await;
+        report(
+            &tx,
+            &format!("Uploading '{}' to '{}'", local_path.display(), remote_path),
+            ReportType::Info,
+        )
+        .await;
 
         let response = self
             .client
@@ -288,13 +297,12 @@ impl NextcloudClient {
         tx: mpsc::Sender<String>,
     ) -> Result<(), AppError> {
         let url = self.build_dav_url(remote_path);
-        println!("Downloading '{remote_path}' to '{}'", local_path.display());
-        let _ = tx
-            .send(format!(
-                "Downloading '{remote_path}' to '{}'",
-                local_path.display()
-            ))
-            .await;
+        report(
+            &tx,
+            &format!("Downloading '{remote_path}' to '{}'", local_path.display()),
+            ReportType::Info,
+        )
+        .await;
 
         let response = self
             .client
@@ -334,10 +342,12 @@ impl NextcloudClient {
         folder_path: &str,
         tx: mpsc::Sender<String>,
     ) -> Result<(), AppError> {
-        println!("Ensuring folder exists at '{folder_path}'");
-        let _ = tx
-            .send(format!("Ensuring folder exists at '{folder_path}'"))
-            .await;
+        report(
+            &tx,
+            &format!("Ensuring folder exists at '{folder_path}'"),
+            ReportType::Info,
+        )
+        .await;
 
         let response = self
             .client
@@ -377,29 +387,36 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
     let metadata = scraper.fetch_property_data(&url, tx_clone).await?;
     let metadata_path = base_dir.join("metadata.json");
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?).await?;
-    println!("Metadata saved to {}", metadata_path.display());
-    let _ = tx
-        .send(format!("Metadata saved to {}", metadata_path.display()))
-        .await;
+    report(
+        &tx,
+        &format!("Metadata saved to {}", metadata_path.display()),
+        ReportType::Info,
+    )
+    .await;
 
     let html_path = base_dir.join("page.html");
     let html = scraper.client.get(&url).send().await?.text().await?;
     fs::write(&html_path, html).await?;
-    println!("HTML saved to {}", html_path.display());
-    let _ = tx
-        .send(format!("HTML saved to {}", html_path.display()))
-        .await;
+    report(
+        &tx,
+        &format!("HTML saved to {}", html_path.display()),
+        ReportType::Info,
+    )
+    .await;
 
     if config.skip_images {
-        println!("--skip-images flag is set, skipping download.");
-        let _ = tx.send("Image download skipped.\n".to_string()).await;
+        report(
+            &tx,
+            "--skip-images flag is set, skipping download.",
+            ReportType::Info,
+        )
+        .await;
     } else if !metadata.image_links.is_empty() {
         let tx_clone = tx.clone();
         scraper
             .download_images(&metadata, &images_dir, config.download_delay_secs, tx_clone)
             .await?;
-        println!("Image download complete.");
-        let _ = tx.send("Image download complete.\n".to_string()).await;
+        report(&tx, "Image download complete.", ReportType::Info).await;
     }
 
     let nc_client = NextcloudClient::new(&config.nc_url, &config.nc_user, &config.nc_pass);
@@ -419,14 +436,15 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
 
         let tx_clone = tx.clone();
         if let Err(e) = nc_client.upload(&local_path, &remote_path, tx_clone).await {
-            eprintln!("Could not upload {file_name}: {e:?}");
-            let _ = tx
-                .send(format!("Failed to upload {file_name}: {e}\n"))
-                .await;
+            report(
+                &tx,
+                &format!("Failed to upload {file_name}: {e}"),
+                ReportType::Error,
+            )
+            .await;
         }
     }
-    println!("Image upload complete.");
-    let _ = tx.send("Image upload complete.\n".to_string()).await;
+    report(&tx, "Image upload complete.", ReportType::Info).await;
 
     let template_remote_path = "Templates/new-property.md";
     let template_local_path = base_dir.join("info.md");
@@ -454,14 +472,32 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
     nc_client
         .upload(&template_local_path, &remote_info_path, tx_clone)
         .await?;
-    println!("Property info template updated and uploaded to {remote_info_path}");
-    let _ = tx
-        .send(format!(
-            "Property info template updated and uploaded to {remote_info_path}"
-        ))
-        .await;
+    report(
+        &tx,
+        &format!("Property info template updated and uploaded to {remote_info_path}"),
+        ReportType::Info,
+    )
+    .await;
 
     Ok(())
+}
+
+enum ReportType {
+    Info,
+    Error,
+}
+
+async fn report(tx: &mpsc::Sender<String>, msg: &str, report_type: ReportType) {
+    match report_type {
+        ReportType::Info => {
+            println!("[INFO] {msg}");
+            let _ = tx.send(format!("[INFO] {msg}\n")).await;
+        }
+        ReportType::Error => {
+            eprintln!("[ERROR] {msg}");
+            let _ = tx.send(format!("[ERROR] {msg}\n")).await;
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -481,24 +517,29 @@ async fn handle_form_submission(form: web::Form<FormData>) -> HttpResponse {
     let url = form.listing_text.trim().to_string();
     tokio::spawn(async move {
         if url.is_empty() {
-            let _ = tx.send("Listing URL cannot be empty.\n".to_string()).await;
+            report(&tx, "Listing URL cannot be empty.", ReportType::Error).await;
             return;
         }
 
         if (!url.starts_with("http://") && !url.starts_with("https://"))
             || !url.contains("compass.com/listing/")
         {
-            let _ = tx.send("Invalid Compass listing URL.\n".to_string()).await;
+            report(&tx, "Invalid Compass listing URL.", ReportType::Error).await;
             return;
         }
 
         let tx_clone = tx.clone();
         match create_listing(url, tx_clone).await {
             Ok(()) => {
-                let _ = tx.send("Listing created successfully.\n".to_string()).await;
+                report(&tx, "Listing created successfully.", ReportType::Info).await;
             }
             Err(e) => {
-                let _ = tx.send(format!("Failed to create listing: {e}\n")).await;
+                report(
+                    &tx,
+                    &format!("Failed to create listing: {e}"),
+                    ReportType::Error,
+                )
+                .await;
             }
         }
     });
