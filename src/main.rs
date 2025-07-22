@@ -129,10 +129,10 @@ impl Scraper {
     async fn fetch_property_data(
         &self,
         url: &str,
-        tx: mpsc::Sender<String>,
+        tx: &mpsc::Sender<String>,
     ) -> Result<PropertyMetadata, AppError> {
         report(
-            &tx,
+            tx,
             &format!("Fetching HTML from {url}..."),
             ReportType::Info,
         )
@@ -181,10 +181,10 @@ impl Scraper {
         metadata: &PropertyMetadata,
         images_dir: &Path,
         delay: u64,
-        tx: mpsc::Sender<String>,
+        tx: &mpsc::Sender<String>,
     ) -> Result<(), AppError> {
         report(
-            &tx,
+            tx,
             &format!(
                 "Downloading {} images sequentially...",
                 metadata.image_links.len()
@@ -196,11 +196,11 @@ impl Scraper {
         for (i, link) in metadata.image_links.iter().enumerate() {
             let file_name = format!("{}.webp", i + 1);
             let file_path = images_dir.join(file_name);
-            report(&tx, &format!("Downloading {link}..."), ReportType::Info).await;
+            report(tx, &format!("Downloading {link}..."), ReportType::Info).await;
 
             if file_path.exists() {
                 report(
-                    &tx,
+                    tx,
                     &format!(
                         " -> File already exists at {}. Skipping.",
                         file_path.display()
@@ -216,7 +216,7 @@ impl Scraper {
             fs::write(&file_path, &content).await?;
 
             report(
-                &tx,
+                tx,
                 &format!(" -> Saved to {}", file_path.display()),
                 ReportType::Info,
             )
@@ -227,7 +227,6 @@ impl Scraper {
     }
 }
 
-#[derive(Debug, Clone)]
 struct NextcloudClient {
     client: Client,
     base_url: String,
@@ -269,12 +268,12 @@ impl NextcloudClient {
         &self,
         local_path: &Path,
         remote_path: &str,
-        tx: mpsc::Sender<String>,
+        tx: &mpsc::Sender<String>,
     ) -> Result<(), AppError> {
         let url = self.build_dav_url(remote_path);
         let file_contents = fs::read(local_path).await?;
         report(
-            &tx,
+            tx,
             &format!("Uploading '{}' to '{}'", local_path.display(), remote_path),
             ReportType::Info,
         )
@@ -295,11 +294,11 @@ impl NextcloudClient {
         &self,
         remote_path: &str,
         local_path: &Path,
-        tx: mpsc::Sender<String>,
+        tx: &mpsc::Sender<String>,
     ) -> Result<(), AppError> {
         let url = self.build_dav_url(remote_path);
         report(
-            &tx,
+            tx,
             &format!("Downloading '{remote_path}' to '{}'", local_path.display()),
             ReportType::Info,
         )
@@ -325,14 +324,13 @@ impl NextcloudClient {
     async fn create_folder_recursive(
         &self,
         folder_path: &str,
-        tx: mpsc::Sender<String>,
+        tx: &mpsc::Sender<String>,
     ) -> Result<(), AppError> {
         let mut current_path = PathBuf::new();
         for component in Path::new(folder_path).components() {
             current_path.push(component);
             if let Some(path_str) = current_path.to_str() {
-                let tx_clone = tx.clone();
-                self.create_folder(path_str, tx_clone).await?;
+                self.create_folder(path_str, tx).await?;
             }
         }
         Ok(())
@@ -341,10 +339,10 @@ impl NextcloudClient {
     async fn create_folder(
         &self,
         folder_path: &str,
-        tx: mpsc::Sender<String>,
+        tx: &mpsc::Sender<String>,
     ) -> Result<(), AppError> {
         report(
-            &tx,
+            tx,
             &format!("Ensuring folder exists at '{folder_path}'"),
             ReportType::Info,
         )
@@ -378,7 +376,7 @@ fn hash_url_to_filename(url: &str) -> String {
     format!("{hash:x}")
 }
 
-async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), AppError> {
+async fn create_listing(url: String, tx: &mpsc::Sender<String>) -> Result<(), AppError> {
     let config = Config::from_env()?;
     let listing_id = hash_url_to_filename(&url);
 
@@ -387,12 +385,11 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
     fs::create_dir_all(&images_dir).await?;
 
     let scraper = Scraper::new()?;
-    let tx_clone = tx.clone();
-    let metadata = scraper.fetch_property_data(&url, tx_clone).await?;
+    let metadata = scraper.fetch_property_data(&url, tx).await?;
     let metadata_path = base_dir.join("metadata.json");
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?).await?;
     report(
-        &tx,
+        tx,
         &format!("Metadata saved to {}", metadata_path.display()),
         ReportType::Info,
     )
@@ -402,7 +399,7 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
     let html = scraper.client.get(&url).send().await?.text().await?;
     fs::write(&html_path, html).await?;
     report(
-        &tx,
+        tx,
         &format!("HTML saved to {}", html_path.display()),
         ReportType::Info,
     )
@@ -410,17 +407,16 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
 
     if config.skip_images {
         report(
-            &tx,
+            tx,
             "--skip-images flag is set, skipping download.",
             ReportType::Info,
         )
         .await;
     } else if !metadata.image_links.is_empty() {
-        let tx_clone = tx.clone();
         scraper
-            .download_images(&metadata, &images_dir, config.download_delay_secs, tx_clone)
+            .download_images(&metadata, &images_dir, config.download_delay_secs, tx)
             .await?;
-        report(&tx, "Image download complete.", ReportType::Info).await;
+        report(tx, "Image download complete.", ReportType::Info).await;
     }
 
     let nc_client = NextcloudClient::new(&config.nc_url, &config.nc_user, &config.nc_pass);
@@ -428,15 +424,13 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
     let remote_property_dir = format!("{}/{}", remote_base_path, metadata.street);
     let remote_images_dir = format!("{remote_property_dir}/images/compass");
 
-    let tx_clone = tx.clone();
     nc_client
-        .create_folder_recursive(&remote_images_dir, tx_clone)
+        .create_folder_recursive(&remote_images_dir, tx)
         .await?;
 
     let remote_docs_dir = format!("{remote_property_dir}/docs");
-    let tx_clone = tx.clone();
     nc_client
-        .create_folder_recursive(&remote_docs_dir, tx_clone)
+        .create_folder_recursive(&remote_docs_dir, tx)
         .await?;
 
     for (i, _) in metadata.image_links.iter().enumerate() {
@@ -444,23 +438,21 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
         let local_path = images_dir.join(&file_name);
         let remote_path = format!("{remote_images_dir}/{file_name}");
 
-        let tx_clone = tx.clone();
-        if let Err(e) = nc_client.upload(&local_path, &remote_path, tx_clone).await {
+        if let Err(e) = nc_client.upload(&local_path, &remote_path, tx).await {
             report(
-                &tx,
+                tx,
                 &format!("Failed to upload {file_name}: {e}"),
                 ReportType::Error,
             )
             .await;
         }
     }
-    report(&tx, "Image upload complete.", ReportType::Info).await;
+    report(tx, "Image upload complete.", ReportType::Info).await;
 
     let template_remote_path = "Templates/new-property.md";
     let template_local_path = base_dir.join("info.md");
-    let tx_clone = tx.clone();
     nc_client
-        .download(template_remote_path, &template_local_path, tx_clone)
+        .download(template_remote_path, &template_local_path, tx)
         .await?;
 
     let mut contents = fs::read_to_string(&template_local_path).await?;
@@ -478,12 +470,11 @@ async fn create_listing(url: String, tx: mpsc::Sender<String>) -> Result<(), App
 
     let remote_info_path = format!("{remote_property_dir}/info.md");
 
-    let tx_clone = tx.clone();
     nc_client
-        .upload(&template_local_path, &remote_info_path, tx_clone)
+        .upload(&template_local_path, &remote_info_path, tx)
         .await?;
     report(
-        &tx,
+        tx,
         &format!("Property info template updated and uploaded to {remote_info_path}"),
         ReportType::Info,
     )
@@ -538,8 +529,7 @@ async fn handle_form_submission(form: web::Form<FormData>) -> HttpResponse {
             return;
         }
 
-        let tx_clone = tx.clone();
-        match create_listing(url, tx_clone).await {
+        match create_listing(url, &tx).await {
             Ok(()) => {
                 report(&tx, "Listing created successfully.", ReportType::Info).await;
             }
